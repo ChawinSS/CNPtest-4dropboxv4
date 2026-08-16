@@ -1,0 +1,1684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PMS Deposit, Arrival & Fin Journal Data Extractor & CNP Tracker</title>
+  <!-- SheetJS library for parsing uploaded target Excel (.xlsx / .xls) files -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --border-dark: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --highlight-bg: #fef08a;
+      --highlight-border: #eab308;
+      
+      /* CNP Excel Palette */
+      --cnp-green-bg: #22c55e;
+      --cnp-green-text: #ffffff;
+      --cnp-red-bg: #ef4444;
+      --cnp-red-text: #ffffff;
+      --cnp-black-bg: #0f172a;
+      --cnp-header: #581c87;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 1.5rem 1rem;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 98vw;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    header p {
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+      font-size: 0.9rem;
+    }
+
+    /* 4-Column Dropzone Grid */
+    .dropzone-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+
+    @media (max-width: 1100px) {
+      .dropzone-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .dropzone-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .dropzone {
+      border: 2px dashed var(--border-dark);
+      border-radius: 10px;
+      background-color: var(--card);
+      padding: 1.15rem 0.75rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background-color: #eff6ff;
+    }
+
+    .dropzone svg {
+      width: 30px;
+      height: 30px;
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 1.75;
+      margin-bottom: 0.35rem;
+    }
+
+    .dropzone.secondary svg {
+      stroke: #16a34a;
+    }
+
+    .dropzone.tertiary svg {
+      stroke: #ea580c;
+    }
+
+    .dropzone.target svg {
+      stroke: #9333ea;
+    }
+
+    .dropzone p {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+
+    .raw-input-toggle {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 0.85rem;
+      text-decoration: underline;
+      align-self: flex-start;
+    }
+
+    textarea {
+      width: 100%;
+      height: 90px;
+      background-color: var(--card);
+      border: 1px solid var(--border-dark);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0.6rem;
+      font-family: monospace;
+      font-size: 0.85rem;
+      resize: vertical;
+      display: none;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      background-color: var(--card);
+      padding: 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      position: relative;
+    }
+
+    .search-box input {
+      flex: 1;
+      background-color: #ffffff;
+      border: 1px solid var(--border-dark);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 0.55rem 0.75rem;
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-box input:focus {
+      border-color: var(--accent);
+    }
+
+    .search-match-badge {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #ca8a04;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .badge-count {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .btn {
+      background-color: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.825rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      background-color: #ffffff;
+      border: 1px solid var(--border-dark);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--bg);
+    }
+
+    .btn-warning {
+      background-color: #fef08a;
+      border: 1px solid #eab308;
+      color: #854d0e;
+    }
+
+    .btn-warning:hover {
+      background-color: #fde047;
+    }
+
+    .btn-print {
+      background-color: #047857;
+      color: #ffffff;
+    }
+
+    .btn-print:hover {
+      background-color: #065f46;
+    }
+
+    .btn-sort-toggle {
+      background-color: #f1f5f9;
+      border: 1px solid var(--border-dark);
+      color: #334155;
+      font-weight: 600;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .btn-sort-toggle:hover {
+      background-color: #e2e8f0;
+    }
+
+    .btn-sort-toggle.active {
+      background-color: #581c87;
+      border-color: #581c87;
+      color: #ffffff;
+    }
+
+    .btn-copy-row {
+      background-color: #0f172a;
+      color: #ffffff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.25rem 0.55rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-copy-row:hover {
+      background-color: #334155;
+    }
+
+    .btn-copy-row.copied {
+      background-color: #16a34a !important;
+      color: #ffffff;
+    }
+
+    /* 3-Column Tables Layout */
+    .tables-three-columns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.85rem;
+      align-items: start;
+    }
+
+    @media (max-width: 1180px) {
+      .tables-three-columns {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background-color: var(--card);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .compact-table-container {
+      max-height: 205px;
+      overflow-y: auto;
+    }
+
+    #matchesSection .table-container {
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: center;
+      font-size: 0.76rem;
+    }
+
+    #dataTable th, #dataTable td,
+    #arrivalDataTable th, #arrivalDataTable td,
+    #finJrnlDataTable th, #finJrnlDataTable td {
+      text-align: left;
+      padding: 0.38rem 0.5rem;
+      white-space: nowrap;
+    }
+
+    #dataTable th:first-child, #dataTable td:first-child,
+    #arrivalDataTable th:first-child, #arrivalDataTable td:first-child,
+    #finJrnlDataTable th:first-child, #finJrnlDataTable td:first-child {
+      text-align: center;
+    }
+
+    #matchesSection table th, #matchesSection table td {
+      padding: 0.45rem 0.3rem;
+      text-align: center;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background-color: #f1f5f9;
+      color: var(--text);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.67rem;
+      letter-spacing: 0.02em;
+      z-index: 10;
+      line-height: 1.2;
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    #matchesSection th {
+      background-color: var(--cnp-header);
+      color: #ffffff;
+      border-bottom: none;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background-color: #f8fafc;
+    }
+
+    tr.row-matched {
+      background-color: var(--highlight-bg) !important;
+      outline: 2px solid var(--highlight-border);
+    }
+
+    tr.row-matched td {
+      color: #000000;
+      font-weight: 600;
+    }
+
+    tr.row-not-found {
+      background-color: #fff1f2 !important;
+      border-left: 3px solid #f43f5e;
+    }
+
+    tr.row-not-found td {
+      color: #9f1239;
+    }
+
+    .not-found-comment {
+      color: #be123c;
+      font-style: italic;
+      font-weight: 600;
+      font-size: 0.78rem;
+    }
+
+    .highlight {
+      color: #0369a1;
+      font-family: monospace;
+      white-space: nowrap;
+    }
+
+    .highlight-bold-suffix {
+      font-weight: 800;
+      color: #dc2626;
+      text-decoration: underline;
+    }
+
+    .amount {
+      color: #047857;
+      font-family: monospace;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      padding: 1.75rem 0.8rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    .section-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    #matchesSection {
+      display: none;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding-top: 0.8rem;
+      border-top: 2px dashed var(--border-dark);
+    }
+
+    .missing-alert {
+      background-color: #fff1f2;
+      border: 1px solid #fecdd3;
+      color: #9f1239;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      display: none;
+    }
+
+    .custom-tag-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #ffffff;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-dark);
+      font-size: 0.8rem;
+      font-weight: normal;
+    }
+
+    .custom-tag-input {
+      width: 80px;
+      padding: 0.2rem 0.4rem;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      text-transform: uppercase;
+      outline: none;
+    }
+
+    .cell-green {
+      background-color: var(--cnp-green-bg);
+      color: var(--cnp-green-text);
+      font-weight: 700;
+      padding: 0.25rem 0.5rem;
+      border-radius: 3px;
+      display: inline-block;
+      min-width: 32px;
+      font-size: 0.75rem;
+    }
+
+    .cell-red {
+      background-color: var(--cnp-red-bg);
+      color: var(--cnp-red-text);
+      font-weight: 700;
+      padding: 0.25rem 0.45rem;
+      border-radius: 3px;
+      display: inline-block;
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    .cell-black {
+      background-color: var(--cnp-black-bg);
+      color: transparent;
+      padding: 0.25rem 0.4rem;
+      border-radius: 3px;
+      display: inline-block;
+      min-width: 28px;
+      user-select: none;
+      font-size: 0.75rem;
+    }
+
+    @media print {
+      @page {
+        size: landscape;
+        margin: 10mm;
+      }
+
+      body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        padding: 0 !important;
+      }
+
+      .container {
+        max-width: 100% !important;
+        gap: 0 !important;
+      }
+
+      header,
+      .dropzone-grid,
+      .raw-input-toggle,
+      textarea,
+      .toolbar,
+      .section-title,
+      .btn,
+      .btn-copy-row,
+      .tables-three-columns,
+      .compact-table-container,
+      #dataTable,
+      #arrivalDataTable,
+      #finJrnlDataTable,
+      #matchesSection > .section-title,
+      th:last-child,
+      td:last-child {
+        display: none !important;
+      }
+
+      #matchesSection {
+        display: block !important;
+        padding-top: 0 !important;
+        border-top: none !important;
+      }
+
+      #matchesSection .table-container {
+        max-height: none !important;
+        overflow: visible !important;
+        border: 1px solid #000000 !important;
+        box-shadow: none !important;
+      }
+
+      table {
+        font-size: 8pt !important;
+        width: 100% !important;
+      }
+
+      th {
+        background-color: #581c87 !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .cell-green {
+        background-color: #22c55e !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .cell-red {
+        background-color: #ef4444 !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .cell-black {
+        background-color: #0f172a !important;
+        color: transparent !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>PMS Deposit, Arrival & Fin Journal Data Extractor & CNP Tracker</h1>
+      <p>Drop your Opera reports or import target GST# Excel files below.</p>
+    </header>
+
+    <div class="dropzone-grid">
+      <!-- 1) Deposit Activity Drop Zone -->
+      <div class="dropzone" id="dropzone">
+        <svg viewBox="0 0 24 24">
+          <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p><strong>1. Deposit Activity</strong></p>
+        <p style="font-size: 0.72rem; color: #64748b;">Drop deposit or <span style="color: var(--accent); text-decoration: underline;">browse</span></p>
+        <input type="file" id="fileInput" style="display: none;" accept=".txt,.csv,.log">
+      </div>
+
+      <!-- 2) Arrival Details Drop Zone -->
+      <div class="dropzone secondary" id="secondaryDropzone" style="background-color: #f0fdf4; border-color: #86efac;">
+        <svg viewBox="0 0 24 24" style="stroke: #16a34a;">
+          <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p><strong>2. Arrival Detail</strong></p>
+        <p style="font-size: 0.72rem; color: #64748b;">Drop arrival or <span style="color: #16a34a; text-decoration: underline;">browse</span></p>
+        <input type="file" id="secondaryFileInput" style="display: none;" accept=".txt,.csv,.log">
+      </div>
+
+      <!-- 3) Financial Journal Drop Zone -->
+      <div class="dropzone tertiary" id="tertiaryDropzone" style="background-color: #fff7ed; border-color: #fdba74;">
+        <svg viewBox="0 0 24 24" style="stroke: #ea580c;">
+          <path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p><strong>3. Fin Journal / CC</strong></p>
+        <p style="font-size: 0.72rem; color: #64748b;">Drop finjrnl or <span style="color: #ea580c; text-decoration: underline;">browse</span></p>
+        <input type="file" id="tertiaryFileInput" style="display: none;" accept=".txt,.csv,.log">
+      </div>
+
+      <!-- 4) Target Excel GST# Drop Zone -->
+      <div class="dropzone target" id="targetDropzone" style="background-color: #faf5ff; border-color: #d8b4fe;">
+        <svg viewBox="0 0 24 24" style="stroke: #9333ea;">
+          <path d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p><strong>4. Target GST# Excel</strong></p>
+        <p style="font-size: 0.72rem; color: #64748b;">Drop <strong>.xlsx/.xls</strong> to search</p>
+        <input type="file" id="targetFileInput" style="display: none;" accept=".xlsx,.xls,.csv">
+      </div>
+    </div>
+
+    <button class="raw-input-toggle" id="toggleInputBtn">+ Or paste plain text</button>
+    <textarea id="rawInput" placeholder="Paste pipe-delimited data here (with header)..."></textarea>
+
+    <div class="toolbar">
+      <div class="search-box">
+        <input type="text" id="resvSearchInput" placeholder="Enter comma-separated 9-digit IDs (e.g. 324718054, 324786259) or drop target Excel above...">
+        <span class="search-match-badge" id="searchMatchBadge"></span>
+      </div>
+
+      <div class="missing-alert" id="missingAlert"></div>
+
+      <div class="actions">
+        <div>
+          <button class="btn btn-warning" id="showMatchesBtn">Show Matches Table</button>
+        </div>
+
+        <div>
+          <button class="btn btn-secondary" id="clearBtn">Clear All</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3-Column Tables Layout -->
+    <div class="tables-three-columns">
+      <!-- 1) Deposit Activity Records Table -->
+      <div>
+        <div class="section-title">
+          <span>Deposit Activity</span>
+          <span class="badge-count" id="rowCount">0 resv</span>
+        </div>
+        <div class="table-container compact-table-container">
+          <table id="dataTable">
+            <thead>
+              <tr>
+                <th style="width: 30px;">#</th>
+                <th>RESV ID</th>
+                <th>RATE</th>
+                <th>AMOUNT</th>
+                <th>DATE</th>
+                <th>CARD</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <tr>
+                <td colspan="6" class="empty-state">No deposit data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 2) Arrival Date Details Records Table -->
+      <div>
+        <div class="section-title">
+          <span>Arrival Details</span>
+          <span class="badge-count" id="arrivalRowCount">0 resv</span>
+        </div>
+        <div class="table-container compact-table-container">
+          <table id="arrivalDataTable">
+            <thead>
+              <tr>
+                <th style="width: 30px;">#</th>
+                <th>RESV ID</th>
+                <th>RATE</th>
+                <th>AMOUNT</th>
+                <th>ARRIVAL</th>
+                <th>CARD</th>
+              </tr>
+            </thead>
+            <tbody id="arrivalTableBody">
+              <tr>
+                <td colspan="6" class="empty-state">No arrival data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3) Financial Journal Records Table -->
+      <div>
+        <div class="section-title">
+          <span>Financial Journal / CC</span>
+          <span class="badge-count" id="finJrnlRowCount">0 resv</span>
+        </div>
+        <div class="table-container compact-table-container">
+          <table id="finJrnlDataTable">
+            <thead>
+              <tr>
+                <th style="width: 30px;">#</th>
+                <th>RESV ID</th>
+                <th>TRX / CODE</th>
+                <th>AMOUNT</th>
+                <th>POSTED</th>
+                <th>CARD / DESC</th>
+              </tr>
+            </thead>
+            <tbody id="finJrnlTableBody">
+              <tr>
+                <td colspan="6" class="empty-state">No journal data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matched Records Table Section -->
+    <div id="matchesSection">
+      <div class="section-title">
+        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+          <span>CNP - Manuelle Transaktionen (Matches)</span>
+          
+          <div class="custom-tag-wrapper">
+            <span>Staff Initials:</span>
+            <input type="text" id="customTagInput" class="custom-tag-input" value="-" placeholder="Initials">
+          </div>
+
+          <button id="toggleSortBtn" class="btn-sort-toggle">
+            🔄 Sort: By Entered Input
+          </button>
+
+          <button id="printPdfBtn" class="btn btn-print">
+            🖨️ Export / Print PDF
+          </button>
+        </div>
+        <span class="badge-count" id="matchedCount">0 matches</span>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 35px;">#</th>
+              <th style="width: 110px;">RESERVATION ID (RESV_NAME_ID)</th>
+              <th style="width: 85px;">Rate Code</th>
+              <th style="width: 85px;">Wert</th>
+              <th>Ist Autorisierung nötig?<br><span style="font-weight: normal; font-size: 0.6rem; opacity: 0.9;">(Außer No-Show/Late Cxl - Immer Ja)</span></th>
+              <th style="width: 75px;">Autorisierungs-art</th>
+              <th>Hält das KKA ein?</th>
+              <th>KK immer verborgen?</th>
+              <th>Alle Abbuchungen genehmigt?</th>
+              <th>Richtige KK belastet?</th>
+              <th style="width: 70px;">Maßnahme</th>
+              <th style="width: 65px;">Problem gelöst?</th>
+              <th style="text-align: left; min-width: 190px;">Kommentaren</th>
+              <th style="width: 80px;">Aktion</th>
+            </tr>
+          </thead>
+          <tbody id="matchesTableBody">
+            <tr>
+              <td colspan="14" class="empty-state">No matches found for search terms.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const secondaryDropzone = document.getElementById('secondaryDropzone');
+    const secondaryFileInput = document.getElementById('secondaryFileInput');
+    const tertiaryDropzone = document.getElementById('tertiaryDropzone');
+    const tertiaryFileInput = document.getElementById('tertiaryFileInput');
+    const targetDropzone = document.getElementById('targetDropzone');
+    const targetFileInput = document.getElementById('targetFileInput');
+
+    const rawInput = document.getElementById('rawInput');
+    const toggleInputBtn = document.getElementById('toggleInputBtn');
+    const resvSearchInput = document.getElementById('resvSearchInput');
+    const customTagInput = document.getElementById('customTagInput');
+    const toggleSortBtn = document.getElementById('toggleSortBtn');
+    const printPdfBtn = document.getElementById('printPdfBtn');
+    const searchMatchBadge = document.getElementById('searchMatchBadge');
+    const missingAlert = document.getElementById('missingAlert');
+    const showMatchesBtn = document.getElementById('showMatchesBtn');
+    const matchesSection = document.getElementById('matchesSection');
+    
+    const tableBody = document.getElementById('tableBody');
+    const arrivalTableBody = document.getElementById('arrivalTableBody');
+    const finJrnlTableBody = document.getElementById('finJrnlTableBody');
+    const matchesTableBody = document.getElementById('matchesTableBody');
+    
+    const rowCount = document.getElementById('rowCount');
+    const arrivalRowCount = document.getElementById('arrivalRowCount');
+    const finJrnlRowCount = document.getElementById('finJrnlRowCount');
+    const matchedCount = document.getElementById('matchedCount');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let parsedData = [];
+    let parsedArrivalData = [];
+    let parsedFinJrnlData = [];
+    let combinedMatchesData = [];
+    const copiedRowIndices = new Set();
+    let sortByInputOrder = true;
+
+    toggleInputBtn.addEventListener('click', () => {
+      if (rawInput.style.display === 'block') {
+        rawInput.style.display = 'none';
+        toggleInputBtn.textContent = '+ Or paste plain text';
+      } else {
+        rawInput.style.display = 'block';
+        toggleInputBtn.textContent = '- Hide plain text box';
+        rawInput.focus();
+      }
+    });
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0], 'deposit');
+    });
+
+    secondaryDropzone.addEventListener('click', () => secondaryFileInput.click());
+    secondaryFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0], 'arrival');
+    });
+
+    tertiaryDropzone.addEventListener('click', () => tertiaryFileInput.click());
+    tertiaryFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0], 'finjrnl');
+    });
+
+    targetDropzone.addEventListener('click', () => targetFileInput.click());
+    targetFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleTargetExcel(e.target.files[0]);
+    });
+
+    ['dragenter', 'dragover'].forEach(event => {
+      dropzone.addEventListener(event, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+      secondaryDropzone.addEventListener(event, (e) => { e.preventDefault(); secondaryDropzone.classList.add('dragover'); });
+      tertiaryDropzone.addEventListener(event, (e) => { e.preventDefault(); tertiaryDropzone.classList.add('dragover'); });
+      targetDropzone.addEventListener(event, (e) => { e.preventDefault(); targetDropzone.classList.add('dragover'); });
+    });
+
+    ['dragleave', 'drop'].forEach(event => {
+      dropzone.addEventListener(event, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+      secondaryDropzone.addEventListener(event, (e) => { e.preventDefault(); secondaryDropzone.classList.remove('dragover'); });
+      tertiaryDropzone.addEventListener(event, (e) => { e.preventDefault(); tertiaryDropzone.classList.remove('dragover'); });
+      targetDropzone.addEventListener(event, (e) => { e.preventDefault(); targetDropzone.classList.remove('dragover'); });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault(); dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0], 'deposit');
+      else { const text = e.dataTransfer.getData('text'); if (text) processData(text); }
+    });
+
+    secondaryDropzone.addEventListener('drop', (e) => {
+      e.preventDefault(); secondaryDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0], 'arrival');
+      else { const text = e.dataTransfer.getData('text'); if (text) processArrivalData(text); }
+    });
+
+    tertiaryDropzone.addEventListener('drop', (e) => {
+      e.preventDefault(); tertiaryDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0], 'finjrnl');
+      else { const text = e.dataTransfer.getData('text'); if (text) processFinJrnlData(text); }
+    });
+
+    targetDropzone.addEventListener('drop', (e) => {
+      e.preventDefault(); targetDropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) handleTargetExcel(e.dataTransfer.files[0]);
+    });
+
+    rawInput.addEventListener('input', (e) => {
+      const text = e.target.value;
+      if (text.includes('ARR_') || text.includes('Arrival Date')) processArrivalData(text);
+      else if (text.includes('TRX_NO') || text.includes('FOLIO_NO') || text.includes('finjrnl')) processFinJrnlData(text);
+      else processData(text);
+    });
+
+    resvSearchInput.addEventListener('input', applyFilters);
+    customTagInput.addEventListener('input', () => renderMatchesTable(combinedMatchesData));
+
+    toggleSortBtn.addEventListener('click', () => {
+      sortByInputOrder = !sortByInputOrder;
+      toggleSortBtn.classList.toggle('active', sortByInputOrder);
+      toggleSortBtn.textContent = sortByInputOrder ? '🔄 Sort: By Entered Input' : '📄 Sort: By File Order';
+      applyFilters();
+    });
+
+    printPdfBtn.addEventListener('click', () => {
+      if (!combinedMatchesData.length) {
+        alert('Please extract and search IDs before exporting to PDF.');
+        return;
+      }
+      window.print();
+    });
+
+    showMatchesBtn.addEventListener('click', () => {
+      matchesSection.style.display = 'flex';
+      matchesSection.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    function handleFile(file, type) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (type === 'deposit') processData(e.target.result);
+        else if (type === 'arrival') processArrivalData(e.target.result);
+        else if (type === 'finjrnl') processFinJrnlData(e.target.result);
+      };
+      reader.readAsText(file);
+    }
+
+    // Handles Dropped Target Excel (.xlsx, .xls, .csv)
+    function handleTargetExcel(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+        const extractedGstIds = [];
+
+        for (const row of jsonData) {
+          if (!Array.isArray(row)) continue;
+          for (const cell of row) {
+            const strCell = String(cell || '').trim();
+            const match = strCell.match(/\b(?:GST#?)?(\d{9})\b/i);
+            if (match && match[1]) {
+              if (!extractedGstIds.includes(match[1])) {
+                extractedGstIds.push(match[1]);
+              }
+            }
+          }
+        }
+
+        if (extractedGstIds.length > 0) {
+          resvSearchInput.value = extractedGstIds.join(', ');
+          applyFilters();
+          matchesSection.style.display = 'flex';
+        } else {
+          alert('No 9-digit GST# reservation numbers found in the uploaded Excel file.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function determineAuthorizationNeed(shortStatus, resType) {
+      const s = (shortStatus || '').toUpperCase().trim();
+      const r = (resType || '').toUpperCase().trim();
+
+      if (s === 'NOSH' || s === 'NOSHOW' || s === 'NS' || r.includes('NO-SHOW') || r.includes('NOSHOW')) return 'Nein (No-Show)';
+      if (s === 'CXL' || s === 'CAN' || s === 'CANCELLED' || r.includes('CXL') || r.includes('CANCEL')) return 'Nein (Late Cxl)';
+      return 'Ja';
+    }
+
+    function determineIsECNP(rateCode, channelName) {
+      const code = (rateCode || '').toUpperCase().trim();
+      const channel = (channelName || '').toUpperCase().trim();
+      
+      return (
+        code.startsWith('EX') || 
+        code.includes('EXPD') || 
+        code.includes('EXPK') || 
+        code.includes('EXFL') || 
+        code === 'C24NOFRO' || 
+        code === 'C24NOFBB' ||
+        code === 'C24FLXRO' ||
+        channel.includes('EXPEDIA') || 
+        channel.includes('HOTELS.COM') ||
+        channel.includes('CHECK24') ||
+        channel.includes('KIECKSEE')
+      );
+    }
+
+    function getBaseCommentPrefix(isECNP, rateCode, channelName, authNeed) {
+      if (authNeed === 'Nein (No-Show)') return 'No show charge';
+      if (authNeed === 'Nein (Late Cxl)') return 'Late cancellation charge';
+
+      const code = (rateCode || '').toUpperCase().trim();
+      const channel = (channelName || '').toUpperCase().trim();
+
+      if (isECNP) {
+        if (channel.includes('EXPEDIA') || channel.includes('HOTELS.COM') || code.startsWith('EX')) {
+          return 'OK ECNP -Expedia collect';
+        }
+        if (channel.includes('CHECK24') || channel.includes('KIECKSEE') || code.startsWith('C24')) {
+          return 'OK ECNP DZ';
+        }
+        return 'OK ECNP';
+      }
+
+      return 'OK Non flex Booking.com';
+    }
+
+    function formatResvIdWithBoldLast4(resvId) {
+      const idStr = String(resvId || '').trim();
+      if (idStr.length <= 4) return `<span class="highlight-bold-suffix">${escapeHtml(idStr)}</span>`;
+      const prefix = idStr.slice(0, -4);
+      const last4 = idStr.slice(-4);
+      return `${escapeHtml(prefix)}<span class="highlight-bold-suffix">${escapeHtml(last4)}</span>`;
+    }
+
+    // 1. Process Deposit Activity
+    function processData(text) {
+      if (!text || !text.trim()) { resetDepositTable(); return; }
+      const rawLines = text.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+      if (rawLines.length < 2) return;
+
+      const headers = rawLines[0].split('|').map(h => h.trim());
+      let resvIdIdx = headers.indexOf('RESV_NAME_ID');
+      if (resvIdIdx === -1) resvIdIdx = headers.indexOf('DEP_RESV_NAME_ID');
+
+      const rateCodeIdx = headers.indexOf('RATE_CODE');
+      let amountIdx = headers.indexOf('POSTED_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('DEP_PAYED');
+      if (amountIdx === -1) amountIdx = headers.indexOf('EFFECTIVE_RATE_AMOUNT');
+
+      let dateIdx = headers.indexOf('POSTED_DATE');
+      if (dateIdx === -1) dateIdx = headers.indexOf('LAST_PAYMENT_DATE');
+      if (dateIdx === -1) dateIdx = headers.indexOf('ARRIVAL');
+
+      let cardTypeIdx = headers.indexOf('DESCRIPTION');
+      if (cardTypeIdx === -1) cardTypeIdx = headers.indexOf('PAYMENT_METHOD');
+
+      const shortStatusIdx = headers.indexOf('SHORT_RESV_STATUS');
+      const resTypeIdx = headers.indexOf('RES_TYPE');
+      let channelIdx = headers.indexOf('C_T_S_NAME');
+      if (channelIdx === -1) channelIdx = headers.indexOf('COMPANY_NAME');
+
+      const stitchedRows = [];
+      let currentRow = '';
+
+      for (let i = 1; i < rawLines.length; i++) {
+        const line = rawLines[i].trim();
+        const isNewRecord = /^(\d{10}|\d{8}|DEP_|RMS_|R_)/.test(line);
+        if (isNewRecord) {
+          if (currentRow) stitchedRows.push(currentRow);
+          currentRow = line;
+        } else {
+          currentRow += (currentRow ? ' ' : '') + line;
+        }
+      }
+      if (currentRow) stitchedRows.push(currentRow);
+
+      parsedData = [];
+
+      for (const row of stitchedRows) {
+        if (row.startsWith('DEP_') || row.startsWith('RMS_') || row.startsWith('R_')) continue;
+        const cols = row.split('|');
+        const resvId = resvIdIdx !== -1 && cols[resvIdIdx] ? cols[resvIdIdx].trim() : '';
+        const rateCode = rateCodeIdx !== -1 && cols[rateCodeIdx] ? cols[rateCodeIdx].trim() : '';
+        const rawAmount = amountIdx !== -1 && cols[amountIdx] ? cols[amountIdx].trim() : '';
+        const rawDate = dateIdx !== -1 && cols[dateIdx] ? cols[dateIdx].trim() : '-';
+        const rawCardType = cardTypeIdx !== -1 && cols[cardTypeIdx] ? cols[cardTypeIdx].trim() : '-';
+
+        const shortStatus = shortStatusIdx !== -1 && cols[shortStatusIdx] ? cols[shortStatusIdx].trim() : '';
+        const resType = resTypeIdx !== -1 && cols[resTypeIdx] ? cols[resTypeIdx].trim() : '';
+        const channelName = channelIdx !== -1 && cols[channelIdx] ? cols[channelIdx].trim() : '';
+
+        if (resvId && /^\d+$/.test(resvId)) {
+          const authNeed = determineAuthorizationNeed(shortStatus, resType);
+          const isECNP = determineIsECNP(rateCode, channelName);
+          const commentPrefix = getBaseCommentPrefix(isECNP, rateCode, channelName, authNeed);
+
+          let formattedAmount = '0.00 €';
+          if (rawAmount !== '') formattedAmount = rawAmount.includes('€') ? rawAmount : `${rawAmount} €`;
+
+          parsedData.push({
+            resvId: resvId,
+            rateCode: rateCode || '-',
+            rateAmount: formattedAmount,
+            date: rawDate,
+            cardType: rawCardType,
+            authNeed: authNeed,
+            isECNP: isECNP,
+            commentPrefix: commentPrefix
+          });
+        }
+      }
+
+      renderTable(parsedData);
+      applyFilters();
+    }
+
+    // 2. Process Arrival Details
+    function processArrivalData(text) {
+      if (!text || !text.trim()) { resetArrivalTable(); return; }
+      const rawLines = text.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+      if (rawLines.length < 2) return;
+
+      const headers = rawLines[0].split('|').map(h => h.trim());
+      let resvIdIdx = headers.indexOf('RESV_NAME_ID');
+      if (resvIdIdx === -1) resvIdIdx = headers.indexOf('RESERVATION_ID');
+
+      const rateCodeIdx = headers.indexOf('RATE_CODE');
+      let amountIdx = headers.indexOf('EFFECTIVE_RATE_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('SHARE_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('TOTAL_AMOUNT');
+
+      let dateIdx = headers.indexOf('ARRIVAL');
+      let cardTypeIdx = headers.indexOf('PAYMENT_METHOD');
+      if (cardTypeIdx === -1) cardTypeIdx = headers.indexOf('DESCRIPTION');
+
+      const shortStatusIdx = headers.indexOf('SHORT_RESV_STATUS');
+      const resTypeIdx = headers.indexOf('RES_TYPE');
+      let channelIdx = headers.indexOf('COMPANY_NAME');
+      if (channelIdx === -1) channelIdx = headers.indexOf('C_T_S_NAME');
+
+      const stitchedRows = [];
+      let currentRow = '';
+
+      for (let i = 1; i < rawLines.length; i++) {
+        const line = rawLines[i].trim();
+        const isNewRecord = /^\d{8}\|/.test(line) || /^(\d{10}|\d{8}|ARR_|RMS_|R_)/.test(line);
+        if (isNewRecord) {
+          if (currentRow) stitchedRows.push(currentRow);
+          currentRow = line;
+        } else {
+          currentRow += (currentRow ? ' ' : '') + line;
+        }
+      }
+      if (currentRow) stitchedRows.push(currentRow);
+
+      parsedArrivalData = [];
+
+      for (const row of stitchedRows) {
+        if (row.startsWith('ARR_') || row.startsWith('RMS_') || row.startsWith('R_') || row.startsWith('Arrival Date Total')) continue;
+        const cols = row.split('|');
+        const resvId = resvIdIdx !== -1 && cols[resvIdIdx] ? cols[resvIdIdx].trim() : '';
+        const rateCode = rateCodeIdx !== -1 && cols[rateCodeIdx] ? cols[rateCodeIdx].trim() : '';
+        const rawAmount = amountIdx !== -1 && cols[amountIdx] ? cols[amountIdx].trim() : '';
+        const rawDate = dateIdx !== -1 && cols[dateIdx] ? cols[dateIdx].trim() : '-';
+        const rawCardType = cardTypeIdx !== -1 && cols[cardTypeIdx] ? cols[cardTypeIdx].trim() : '-';
+
+        const shortStatus = shortStatusIdx !== -1 && cols[shortStatusIdx] ? cols[shortStatusIdx].trim() : '';
+        const resType = resTypeIdx !== -1 && cols[resTypeIdx] ? cols[resTypeIdx].trim() : '';
+        const companyName = channelIdx !== -1 && cols[channelIdx] ? cols[channelIdx].trim() : '';
+
+        if (resvId && /^\d+$/.test(resvId)) {
+          const authNeed = determineAuthorizationNeed(shortStatus, resType);
+          const isECNP = determineIsECNP(rateCode, companyName);
+          const commentPrefix = getBaseCommentPrefix(isECNP, rateCode, companyName, authNeed);
+
+          let formattedAmount = '0.00 €';
+          if (rawAmount !== '') formattedAmount = rawAmount.includes('€') ? rawAmount : `${rawAmount} €`;
+
+          parsedArrivalData.push({
+            resvId: resvId,
+            rateCode: rateCode || '-',
+            rateAmount: formattedAmount,
+            date: rawDate,
+            cardType: rawCardType,
+            authNeed: authNeed,
+            isECNP: isECNP,
+            commentPrefix: commentPrefix
+          });
+        }
+      }
+
+      renderArrivalTable(parsedArrivalData);
+      applyFilters();
+    }
+
+    // 3. Process Financial Journal (with 9-digit fallback)
+    function processFinJrnlData(text) {
+      if (!text || !text.trim()) { resetFinJrnlTable(); return; }
+      const rawLines = text.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+      if (rawLines.length < 2) return;
+
+      const headers = rawLines[0].split('|').map(h => h.trim());
+      let resvIdIdx = headers.indexOf('RESV_NAME_ID');
+      if (resvIdIdx === -1) resvIdIdx = headers.indexOf('RESERVATION_ID');
+
+      let rateCodeIdx = headers.indexOf('RATE_CODE');
+      if (rateCodeIdx === -1) rateCodeIdx = headers.indexOf('TRX_CODE');
+
+      let amountIdx = headers.indexOf('POSTED_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('NET_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('GROSS_AMOUNT');
+      if (amountIdx === -1) amountIdx = headers.indexOf('AMOUNT');
+
+      let dateIdx = headers.indexOf('TRX_DATE');
+      if (dateIdx === -1) dateIdx = headers.indexOf('POSTED_DATE');
+      if (dateIdx === -1) dateIdx = headers.indexOf('BUSINESS_DATE');
+
+      let cardTypeIdx = headers.indexOf('DESCRIPTION');
+      if (cardTypeIdx === -1) cardTypeIdx = headers.indexOf('TC_DESCRIPTION');
+      if (cardTypeIdx === -1) cardTypeIdx = headers.indexOf('PAYMENT_METHOD');
+
+      let channelIdx = headers.indexOf('COMPANY_NAME');
+      if (channelIdx === -1) channelIdx = headers.indexOf('SOURCE');
+      if (channelIdx === -1) channelIdx = headers.indexOf('C_T_S_NAME');
+
+      const stitchedRows = [];
+      let currentRow = '';
+
+      for (let i = 1; i < rawLines.length; i++) {
+        const line = rawLines[i].trim();
+        const isNewRecord = /^(\d{10}|\d{8}|FIN_|RMS_|R_|TRX_)/.test(line);
+        if (isNewRecord) {
+          if (currentRow) stitchedRows.push(currentRow);
+          currentRow = line;
+        } else {
+          currentRow += (currentRow ? ' ' : '') + line;
+        }
+      }
+      if (currentRow) stitchedRows.push(currentRow);
+
+      parsedFinJrnlData = [];
+
+      for (const row of stitchedRows) {
+        if (row.startsWith('FIN_') || row.startsWith('RMS_') || row.startsWith('R_') || row.startsWith('Report Total')) continue;
+        const cols = row.split('|');
+        
+        let resvId = resvIdIdx !== -1 && cols[resvIdIdx] ? cols[resvIdIdx].trim() : '';
+        if (!resvId || !/^\d{9}$/.test(resvId)) {
+          const match = row.match(/\b(3\d{8}|2\d{8})\b/);
+          if (match) resvId = match[1];
+        }
+
+        const rateCode = rateCodeIdx !== -1 && cols[rateCodeIdx] ? cols[rateCodeIdx].trim() : '';
+        const rawAmount = amountIdx !== -1 && cols[amountIdx] ? cols[amountIdx].trim() : '';
+        const rawDate = dateIdx !== -1 && cols[dateIdx] ? cols[dateIdx].trim() : '-';
+        const rawCardType = cardTypeIdx !== -1 && cols[cardTypeIdx] ? cols[cardTypeIdx].trim() : '-';
+        const companyName = channelIdx !== -1 && cols[channelIdx] ? cols[channelIdx].trim() : '';
+
+        if (resvId && /^\d+$/.test(resvId)) {
+          const authNeed = 'Ja';
+          const isECNP = determineIsECNP(rateCode, companyName);
+          const commentPrefix = getBaseCommentPrefix(isECNP, rateCode, companyName, authNeed);
+
+          let formattedAmount = '0.00 €';
+          if (rawAmount !== '') formattedAmount = rawAmount.includes('€') ? rawAmount : `${rawAmount} €`;
+
+          parsedFinJrnlData.push({
+            resvId: resvId,
+            rateCode: rateCode || '-',
+            rateAmount: formattedAmount,
+            date: rawDate,
+            cardType: rawCardType,
+            authNeed: authNeed,
+            isECNP: isECNP,
+            commentPrefix: commentPrefix
+          });
+        }
+      }
+
+      renderFinJrnlTable(parsedFinJrnlData);
+      applyFilters();
+    }
+
+    function renderTable(data) {
+      if (!data.length) { resetDepositTable(); return; }
+      tableBody.innerHTML = data.map((row, idx) => `
+        <tr data-resv-id="${escapeHtml(row.resvId)}">
+          <td>${idx + 1}</td>
+          <td class="highlight">${escapeHtml(row.resvId)}</td>
+          <td><strong>${escapeHtml(row.rateCode)}</strong></td>
+          <td class="amount">${escapeHtml(row.rateAmount)}</td>
+          <td>${escapeHtml(row.date)}</td>
+          <td><span class="cell-green" style="background-color: #3b82f6;">${escapeHtml(row.cardType)}</span></td>
+        </tr>
+      `).join('');
+      rowCount.textContent = `${data.length} resv`;
+    }
+
+    function renderArrivalTable(data) {
+      if (!data.length) { resetArrivalTable(); return; }
+      arrivalTableBody.innerHTML = data.map((row, idx) => `
+        <tr data-resv-id="${escapeHtml(row.resvId)}">
+          <td>${idx + 1}</td>
+          <td class="highlight">${escapeHtml(row.resvId)}</td>
+          <td><strong>${escapeHtml(row.rateCode)}</strong></td>
+          <td class="amount">${escapeHtml(row.rateAmount)}</td>
+          <td>${escapeHtml(row.date)}</td>
+          <td><span class="cell-green" style="background-color: #10b981;">${escapeHtml(row.cardType)}</span></td>
+        </tr>
+      `).join('');
+      arrivalRowCount.textContent = `${data.length} resv`;
+    }
+
+    function renderFinJrnlTable(data) {
+      if (!data.length) { resetFinJrnlTable(); return; }
+      finJrnlTableBody.innerHTML = data.map((row, idx) => `
+        <tr data-resv-id="${escapeHtml(row.resvId)}">
+          <td>${idx + 1}</td>
+          <td class="highlight">${escapeHtml(row.resvId)}</td>
+          <td><strong>${escapeHtml(row.rateCode)}</strong></td>
+          <td class="amount">${escapeHtml(row.rateAmount)}</td>
+          <td>${escapeHtml(row.date)}</td>
+          <td><span class="cell-green" style="background-color: #f97316;">${escapeHtml(row.cardType)}</span></td>
+        </tr>
+      `).join('');
+      finJrnlRowCount.textContent = `${data.length} resv`;
+    }
+
+    function applyFilters() {
+      const rawSearch = resvSearchInput.value;
+      const searchTerms = rawSearch
+        .split(/[,;\s]+/)
+        .map(term => term.trim().toLowerCase())
+        .filter(term => term.length > 0);
+
+      const rows = tableBody.querySelectorAll('tr[data-resv-id]');
+      const arrivalRows = arrivalTableBody.querySelectorAll('tr[data-resv-id]');
+      const finJrnlRows = finJrnlTableBody.querySelectorAll('tr[data-resv-id]');
+      
+      let matchCount = 0;
+      const matchedRecords = [];
+      const foundTerms = new Set();
+
+      // Highlight in Deposit Activity Table
+      rows.forEach(row => {
+        const resvId = row.getAttribute('data-resv-id').toLowerCase();
+        const matchedTerm = searchTerms.find(term => resvId.includes(term));
+        const isMatched = searchTerms.length > 0 && !!matchedTerm;
+        row.classList.remove('row-matched');
+        if (isMatched) {
+          row.classList.add('row-matched');
+          foundTerms.add(matchedTerm);
+          const rowData = parsedData.find(d => d.resvId.toLowerCase() === resvId);
+          if (rowData && !matchedRecords.some(r => r.resvId === rowData.resvId)) matchedRecords.push(rowData);
+        }
+      });
+
+      // Highlight in Arrival Details Table
+      arrivalRows.forEach(row => {
+        const resvId = row.getAttribute('data-resv-id').toLowerCase();
+        const matchedTerm = searchTerms.find(term => resvId.includes(term));
+        const isMatched = searchTerms.length > 0 && !!matchedTerm;
+        row.classList.remove('row-matched');
+        if (isMatched) {
+          row.classList.add('row-matched');
+          foundTerms.add(matchedTerm);
+          const rowData = parsedArrivalData.find(d => d.resvId.toLowerCase() === resvId);
+          if (rowData && !matchedRecords.some(r => r.resvId === rowData.resvId)) matchedRecords.push(rowData);
+        }
+      });
+
+      // Highlight in Financial Journal Table
+      finJrnlRows.forEach(row => {
+        const resvId = row.getAttribute('data-resv-id').toLowerCase();
+        const matchedTerm = searchTerms.find(term => resvId.includes(term));
+        const isMatched = searchTerms.length > 0 && !!matchedTerm;
+        row.classList.remove('row-matched');
+        if (isMatched) {
+          row.classList.add('row-matched');
+          foundTerms.add(matchedTerm);
+          const rowData = parsedFinJrnlData.find(d => d.resvId.toLowerCase() === resvId);
+          if (rowData && !matchedRecords.some(r => r.resvId === rowData.resvId)) matchedRecords.push(rowData);
+        }
+      });
+
+      combinedMatchesData = [];
+
+      if (searchTerms.length === 0) {
+        searchMatchBadge.textContent = '';
+        missingAlert.style.display = 'none';
+      } else {
+        const missingTerms = searchTerms.filter(t => !foundTerms.has(t));
+
+        if (sortByInputOrder) {
+          searchTerms.forEach(term => {
+            let rowData = parsedData.find(d => d.resvId.toLowerCase().includes(term));
+            if (!rowData) rowData = parsedArrivalData.find(d => d.resvId.toLowerCase().includes(term));
+            if (!rowData) rowData = parsedFinJrnlData.find(d => d.resvId.toLowerCase().includes(term));
+
+            if (rowData) {
+              combinedMatchesData.push({ ...rowData, isNotFound: false });
+            } else {
+              combinedMatchesData.push({
+                resvId: term,
+                rateCode: '-',
+                rateAmount: '-',
+                date: '-',
+                cardType: '-',
+                authNeed: '-',
+                isECNP: false,
+                commentPrefix: '',
+                isNotFound: true
+              });
+            }
+          });
+        } else {
+          matchedRecords.forEach(rec => combinedMatchesData.push({ ...rec, isNotFound: false }));
+          missingTerms.forEach(term => combinedMatchesData.push({
+            resvId: term,
+            rateCode: '-',
+            rateAmount: '-',
+            date: '-',
+            cardType: '-',
+            authNeed: '-',
+            isECNP: false,
+            commentPrefix: '',
+            isNotFound: true
+          }));
+        }
+
+        if (foundTerms.size > 0) {
+          searchMatchBadge.textContent = `Found ${foundTerms.size} match${foundTerms.size === 1 ? '' : 'es'}`;
+          if (missingTerms.length > 0) {
+            missingAlert.style.display = 'block';
+            missingAlert.innerHTML = `<strong>Not found in any uploaded report (${missingTerms.length}):</strong> ${missingTerms.join(', ')}`;
+          } else {
+            missingAlert.style.display = 'none';
+          }
+        } else {
+          searchMatchBadge.textContent = 'No matches found';
+          missingAlert.style.display = 'block';
+          missingAlert.innerHTML = `<strong>None of the entered IDs were found in the uploaded file(s).</strong>`;
+        }
+      }
+
+      renderMatchesTable(combinedMatchesData);
+    }
+
+    function renderMatchesTable(data) {
+      matchedCount.textContent = `${data.length} match${data.length === 1 ? '' : 'es'}`;
+      if (!data.length) {
+        matchesTableBody.innerHTML = `<tr><td colspan="14" class="empty-state">No matches found for search terms.</td></tr>`;
+        return;
+      }
+
+      const userTag = (customTagInput.value || '').trim();
+
+      matchesTableBody.innerHTML = data.map((row, idx) => {
+        if (row.isNotFound) {
+          return `
+            <tr data-index="${idx}" class="row-not-found">
+              <td>${idx + 1}</td>
+              <td class="highlight" style="color: #be123c;">${formatResvIdWithBoldLast4(row.resvId)}</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td style="text-align: left;" class="not-found-comment">
+                RESERVATION ID not found please search in basic search
+              </td>
+              <td>
+                <span style="color: #9f1239; font-size: 0.75rem; font-weight: 500;">Not In File</span>
+              </td>
+            </tr>
+          `;
+        }
+
+        const isNoShowOrCxl = row.authNeed.startsWith('Nein');
+        const isECNP = row.isECNP;
+        
+        const authArtText = isNoShowOrCxl ? '-' : (isECNP ? 'e-CNP' : 'Ja');
+        const fullComment = (isNoShowOrCxl || !userTag || userTag === '-') ? row.commentPrefix : `${row.commentPrefix} ${userTag}`;
+        const isCopied = copiedRowIndices.has(idx);
+
+        return `
+          <tr data-index="${idx}">
+            <td>${idx + 1}</td>
+            <td class="highlight">${formatResvIdWithBoldLast4(row.resvId)}</td>
+            <td><strong>${escapeHtml(row.rateCode)}</strong></td>
+            <td class="amount">${escapeHtml(row.rateAmount)}</td>
+            
+            <!-- 1) Ist Autorisierung nötig? -->
+            <td>
+              ${isNoShowOrCxl 
+                ? `<span class="cell-red">${escapeHtml(row.authNeed)}</span>` 
+                : `<span class="cell-green">Ja</span>`
+              }
+            </td>
+
+            <!-- 2) Autorisierungs-art -->
+            <td>
+              ${isNoShowOrCxl 
+                ? `<span class="cell-black">-</span>` 
+                : `<span class="cell-green">${escapeHtml(authArtText)}</span>`
+              }
+            </td>
+
+            <!-- 3) Hält das KKA ein? -->
+            <td>
+              ${(!isECNP && !isNoShowOrCxl) 
+                ? `<span class="cell-green">Ja</span>` 
+                : `<span class="cell-black">-</span>`
+              }
+            </td>
+
+            <!-- 4) KK immer verborgen? -->
+            <td>
+              ${(!isECNP && !isNoShowOrCxl) 
+                ? `<span class="cell-green">Ja</span>` 
+                : `<span class="cell-black">-</span>`
+              }
+            </td>
+
+            <!-- 5) Sind alle Abbuchungen genehmigt? -->
+            <td>
+              ${isNoShowOrCxl 
+                ? `<span class="cell-black">-</span>` 
+                : `<span class="cell-green">Ja</span>`
+              }
+            </td>
+
+            <!-- 6) Wurde die richtige KK belastet? -->
+            <td>
+              ${(!isECNP && !isNoShowOrCxl) 
+                ? `<span class="cell-green">Ja</span>` 
+                : `<span class="cell-black">-</span>`
+              }
+            </td>
+
+            <!-- 7) Maßnahme -->
+            <td>
+              <span class="cell-black">-</span>
+            </td>
+
+            <!-- 8) Problem gelöst? -->
+            <td>
+              ${isECNP 
+                ? `<span class="cell-green">Ja</span>` 
+                : `<span class="cell-black">-</span>`
+              }
+            </td>
+
+            <!-- 9) Kommentaren -->
+            <td style="text-align: left; font-size: 0.78rem; font-weight: 600; white-space: nowrap;">
+              ${escapeHtml(fullComment)}
+            </td>
+
+            <!-- Row Copy Button -->
+            <td>
+              <button class="btn-copy-row ${isCopied ? 'copied' : ''}" onclick="copyExcelRow(${idx}, this)">
+                ${isCopied ? '✓ Copied' : '📋 Copy'}
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function copyExcelRow(idx, btn) {
+      const row = combinedMatchesData[idx];
+      if (!row || row.isNotFound) return;
+
+      const isNoShowOrCxl = row.authNeed.startsWith('Nein');
+      const isECNP = row.isECNP;
+      const userTag = (customTagInput.value || '').trim();
+      const fullComment = (isNoShowOrCxl || !userTag || userTag === '-') ? row.commentPrefix : `${row.commentPrefix} ${userTag}`;
+
+      const col1_authNeed = isNoShowOrCxl ? row.authNeed : 'Ja';
+      const col2_authArt = isNoShowOrCxl ? '' : (isECNP ? 'e-CNP' : 'Ja');
+      const col3_holdsKKA = (!isECNP && !isNoShowOrCxl) ? 'Ja' : '';
+      const col4_hiddenCC = (!isECNP && !isNoShowOrCxl) ? 'Ja' : '';
+      const col5_allApproved = isNoShowOrCxl ? '' : 'Ja';
+      const col6_correctCC = (!isECNP && !isNoShowOrCxl) ? 'Ja' : '';
+      const col7_measure = '';
+      const col8_problemSolved = isECNP ? 'Ja' : '';
+      const col9_comments = fullComment;
+
+      const excelRowText = [
+        col1_authNeed,
+        col2_authArt,
+        col3_holdsKKA,
+        col4_hiddenCC,
+        col5_allApproved,
+        col6_correctCC,
+        col7_measure,
+        col8_problemSolved,
+        col9_comments
+      ].join('\t');
+
+      navigator.clipboard.writeText(excelRowText).then(() => {
+        copiedRowIndices.add(idx);
+        btn.textContent = '✓ Copied';
+        btn.classList.add('copied');
+      }).catch(err => {
+        alert('Could not copy to clipboard: ' + err);
+      });
+    }
+
+    function resetDepositTable() {
+      parsedData = [];
+      tableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No deposit data loaded.</td></tr>`;
+      rowCount.textContent = '0 resv';
+    }
+
+    function resetArrivalTable() {
+      parsedArrivalData = [];
+      arrivalTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No arrival data loaded.</td></tr>`;
+      arrivalRowCount.textContent = '0 resv';
+    }
+
+    function resetFinJrnlTable() {
+      parsedFinJrnlData = [];
+      finJrnlTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No journal data loaded.</td></tr>`;
+      finJrnlRowCount.textContent = '0 resv';
+    }
+
+    function resetTable() {
+      resetDepositTable();
+      resetArrivalTable();
+      resetFinJrnlTable();
+      combinedMatchesData = [];
+      copiedRowIndices.clear();
+      matchesTableBody.innerHTML = `<tr><td colspan="14" class="empty-state">No matches found for search terms.</td></tr>`;
+      matchedCount.textContent = '0 matches';
+      searchMatchBadge.textContent = '';
+      missingAlert.style.display = 'none';
+      resvSearchInput.value = '';
+    }
+
+    clearBtn.addEventListener('click', () => {
+      rawInput.value = '';
+      fileInput.value = '';
+      secondaryFileInput.value = '';
+      tertiaryFileInput.value = '';
+      targetFileInput.value = '';
+      resetTable();
+    });
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, (m) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[m]);
+    }
+  </script>
+</body>
+</html>
