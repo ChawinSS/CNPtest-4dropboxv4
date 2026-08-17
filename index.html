@@ -233,6 +233,15 @@
       background-color: #6b21a8;
     }
 
+    .btn-copy-all {
+      background-color: #0284c7;
+      color: #ffffff;
+    }
+
+    .btn-copy-all:hover {
+      background-color: #0369a1;
+    }
+
     .btn-secondary {
       background-color: #ffffff;
       border: 1px solid var(--border-dark);
@@ -272,6 +281,42 @@
     .btn-copy-row.copied {
       background-color: #16a34a !important;
       color: #ffffff;
+    }
+
+    /* Excel-like Selection Styling */
+    .selectable-table {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .selectable-table td.cell-selected {
+      background-color: #bae6fd !important;
+      outline: 1px solid #0284c7;
+      color: #0369a1 !important;
+    }
+
+    /* Toast Notification */
+    .copy-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background-color: #0f172a;
+      color: #ffffff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     /* 3 Tables Layout */
@@ -815,7 +860,7 @@
     <!-- Matched Records Table Section -->
     <div id="matchesSection">
       <div class="section-title">
-        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
           <span>CNP - Manuelle Transaktionen (Matches)</span>
           
           <div class="custom-tag-wrapper">
@@ -823,14 +868,22 @@
             <input type="text" id="customTagInput" class="custom-tag-input" value="-" placeholder="Initials">
           </div>
 
+          <!-- NEW: Copy All Matches Button -->
+          <button id="copyAllMatchesBtn" class="btn btn-copy-all">
+            📋 Copy All Matched Rows (Excel TSV)
+          </button>
+
           <button id="printPdfBtn" class="btn btn-print">
             🖨️ Export / Print PDF
           </button>
         </div>
-        <span class="badge-count" id="matchedCount">0 matches</span>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 0.72rem; color: #64748b;">(Tip: Drag across cells to select & Ctrl+C to copy)</span>
+          <span class="badge-count" id="matchedCount">0 matches</span>
+        </div>
       </div>
       <div class="table-container">
-        <table>
+        <table id="matchesTable" class="selectable-table">
           <thead>
             <tr>
               <th style="width: 30px;">#</th>
@@ -862,6 +915,9 @@
 
   </div>
 
+  <!-- Toast for feedback on copy -->
+  <div id="copyToast" class="copy-toast">✓ Copied to clipboard!</div>
+
   <script>
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
@@ -876,10 +932,13 @@
     const customTagInput = document.getElementById('customTagInput');
     const printPdfBtn = document.getElementById('printPdfBtn');
     const runMatchBtn = document.getElementById('runMatchBtn');
+    const copyAllMatchesBtn = document.getElementById('copyAllMatchesBtn');
+    const copyToast = document.getElementById('copyToast');
 
     const searchMatchBadge = document.getElementById('searchMatchBadge');
     const missingAlert = document.getElementById('missingAlert');
     const matchesSection = document.getElementById('matchesSection');
+    const matchesTable = document.getElementById('matchesTable');
     
     const tableBody = document.getElementById('tableBody');
     const arrivalTableBody = document.getElementById('arrivalTableBody');
@@ -984,6 +1043,36 @@
       }
       window.print();
     });
+
+    // Batch Copy All Matched Rows
+    copyAllMatchesBtn.addEventListener('click', () => {
+      if (!combinedMatchesData.length) {
+        alert('No matched records to copy.');
+        return;
+      }
+
+      const rowsText = combinedMatchesData
+        .filter(r => !r.isNotFound)
+        .map(row => formatExcelRowData(row))
+        .join('\n');
+
+      if (!rowsText) {
+        alert('No valid CNP rows to copy.');
+        return;
+      }
+
+      navigator.clipboard.writeText(rowsText).then(() => {
+        showToast(`✓ Copied ${combinedMatchesData.filter(r => !r.isNotFound).length} rows for Excel!`);
+      }).catch(err => {
+        alert('Clipboard copy failed: ' + err);
+      });
+    });
+
+    function showToast(msg) {
+      copyToast.textContent = msg;
+      copyToast.style.display = 'flex';
+      setTimeout(() => { copyToast.style.display = 'none'; }, 2200);
+    }
 
     function handleFile(file, type) {
       const reader = new FileReader();
@@ -1192,7 +1281,6 @@
         if (channel.includes('EXPEDIA') || channel.includes('HOTELS.COM') || code.startsWith('EX')) {
           return 'OK ECNP -Expedia collect';
         }
-        // Check24 and other virtual card channels now resolve strictly to 'OK ECNP'
         return 'OK ECNP';
       }
 
@@ -1550,24 +1638,24 @@
         if (row.isNotFound) {
           return `
             <tr data-index="${idx}" class="row-not-found">
-              <td>${idx + 1}</td>
-              <td class="highlight" style="color: #be123c;">${formatResvIdWithBoldLast4(row.resvId)}</td>
-              <td>-</td>
-              <td class="amount" style="color: #9f1239;">${escapeHtml(row.rateAmount)}</td>
-              <td><span class="source-badge source-none">Not Found</span></td>
-              <td><span class="cashier-badge">${escapeHtml(row.employee || '-')}</span></td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td>-</td>
-              <td style="text-align: left;" class="not-found-comment">
+              <td data-col="0">${idx + 1}</td>
+              <td data-col="1" class="highlight" style="color: #be123c;">${formatResvIdWithBoldLast4(row.resvId)}</td>
+              <td data-col="2">-</td>
+              <td data-col="3" class="amount" style="color: #9f1239;">${escapeHtml(row.rateAmount)}</td>
+              <td data-col="4"><span class="source-badge source-none">Not Found</span></td>
+              <td data-col="5"><span class="cashier-badge">${escapeHtml(row.employee || '-')}</span></td>
+              <td data-col="6">-</td>
+              <td data-col="7">-</td>
+              <td data-col="8">-</td>
+              <td data-col="9">-</td>
+              <td data-col="10">-</td>
+              <td data-col="11">-</td>
+              <td data-col="12">-</td>
+              <td data-col="13">-</td>
+              <td data-col="14" style="text-align: left;" class="not-found-comment">
                 <strong>${escapeHtml(row.commentPrefix)}</strong>
               </td>
-              <td>
+              <td data-col="15">
                 <span style="color: #9f1239; font-size: 0.75rem; font-weight: 600;">Check Opera</span>
               </td>
             </tr>
@@ -1596,31 +1684,31 @@
 
         return `
           <tr data-index="${idx}" class="${isFlex ? 'row-flex-warning' : ''}">
-            <td>${idx + 1}</td>
-            <td class="highlight">${formatResvIdWithBoldLast4(row.resvId)}</td>
+            <td data-col="0">${idx + 1}</td>
+            <td data-col="1" class="highlight">${formatResvIdWithBoldLast4(row.resvId)}</td>
             
-            <!-- Rate Code Column (Highlighted in Red if Flexible Rate) -->
-            <td>
+            <!-- Rate Code Column -->
+            <td data-col="2">
               ${isFlex 
                 ? `<span class="badge-flex-warning">⚠️ ${escapeHtml(row.rateCode)}</span>`
                 : `<strong>${escapeHtml(row.rateCode)}</strong>`
               }
             </td>
 
-            <td class="amount">${escapeHtml(row.rateAmount)}</td>
+            <td data-col="3" class="amount">${escapeHtml(row.rateAmount)}</td>
 
             <!-- Quelle / Source Column -->
-            <td>
+            <td data-col="4">
               <span class="source-badge ${sourceBadgeClass}">${escapeHtml(row.source || '-')}</span>
             </td>
 
             <!-- Mitarbeiter / Cashier Column -->
-            <td>
+            <td data-col="5">
               <span class="cashier-badge">${escapeHtml(row.employee || '-')}</span>
             </td>
             
             <!-- 1) Ist Autorisierung nötig? -->
-            <td>
+            <td data-col="6">
               ${isFlex 
                 ? `<span class="cell-red">Nein (Flex Rate)</span>`
                 : (isNoShowOrCxl 
@@ -1630,7 +1718,7 @@
             </td>
 
             <!-- 2) Autorisierungs-art -->
-            <td>
+            <td data-col="7">
               ${(isNoShowOrCxl || isFlex) 
                 ? `<span class="cell-black">-</span>` 
                 : `<span class="cell-green">${escapeHtml(authArtText)}</span>`
@@ -1638,7 +1726,7 @@
             </td>
 
             <!-- 3) Hält das KKA ein? -->
-            <td>
+            <td data-col="8">
               ${(!isECNP && !isNoShowOrCxl && !isFlex) 
                 ? `<span class="cell-green">Ja</span>` 
                 : `<span class="cell-black">-</span>`
@@ -1646,7 +1734,7 @@
             </td>
 
             <!-- 4) KK immer verborgen? -->
-            <td>
+            <td data-col="9">
               ${(!isECNP && !isNoShowOrCxl && !isFlex) 
                 ? `<span class="cell-green">Ja</span>` 
                 : `<span class="cell-black">-</span>`
@@ -1654,7 +1742,7 @@
             </td>
 
             <!-- 5) Sind alle Abbuchungen genehmigt? -->
-            <td>
+            <td data-col="10">
               ${(isNoShowOrCxl || isFlex) 
                 ? `<span class="cell-black">-</span>` 
                 : `<span class="cell-green">Ja</span>`
@@ -1662,23 +1750,23 @@
             </td>
 
             <!-- 6) Wurde die richtige KK belastet? -->
-            <td>
+            <td data-col="11">
               ${(!isECNP && !isNoShowOrCxl && !isFlex) 
                 ? `<span class="cell-green">Ja</span>` 
                 : `<span class="cell-black">-</span>`
               }
             </td>
 
-            <!-- 7) Maßnahme (Ja if Flex, else -) -->
-            <td>
+            <!-- 7) Maßnahme -->
+            <td data-col="12">
               ${isFlex 
                 ? `<span class="cell-green">Ja</span>` 
                 : `<span class="cell-black">-</span>`
               }
             </td>
 
-            <!-- 8) Problem gelöst? (Ja if e-CNP or Flex, else -) -->
-            <td>
+            <!-- 8) Problem gelöst? -->
+            <td data-col="13">
               ${(isECNP || isFlex) 
                 ? `<span class="cell-green">Ja</span>` 
                 : `<span class="cell-black">-</span>`
@@ -1686,12 +1774,12 @@
             </td>
 
             <!-- 9) Kommentaren -->
-            <td style="text-align: left; font-size: 0.78rem; font-weight: 600; white-space: nowrap;" class="${isFlex ? 'flex-warning-comment' : ''}">
+            <td data-col="14" style="text-align: left; font-size: 0.78rem; font-weight: 600; white-space: nowrap;" class="${isFlex ? 'flex-warning-comment' : ''}">
               ${escapeHtml(fullComment)}
             </td>
 
             <!-- Row Copy Button -->
-            <td>
+            <td data-col="15">
               <button class="btn-copy-row ${isCopied ? 'copied' : ''}" onclick="copyExcelRow(${idx}, this)">
                 ${isCopied ? '✓ Copied' : '📋 Copy'}
               </button>
@@ -1701,10 +1789,8 @@
       }).join('');
     }
 
-    function copyExcelRow(idx, btn) {
-      const row = combinedMatchesData[idx];
-      if (!row || row.isNotFound) return;
-
+    // Formats row into 9 tab-separated Excel CNP columns
+    function formatExcelRowData(row) {
       const isFlex = row.isFlexRate;
       const isNoShowOrCxl = row.authNeed.startsWith('Nein');
       const isECNP = row.isECNP;
@@ -1725,7 +1811,7 @@
       const col8_problemSolved = (isECNP || isFlex) ? 'Ja' : '';
       const col9_comments = fullComment;
 
-      const excelRowText = [
+      return [
         col1_authNeed,
         col2_authArt,
         col3_holdsKKA,
@@ -1736,13 +1822,97 @@
         col8_problemSolved,
         col9_comments
       ].join('\t');
+    }
+
+    function copyExcelRow(idx, btn) {
+      const row = combinedMatchesData[idx];
+      if (!row || row.isNotFound) return;
+
+      const excelRowText = formatExcelRowData(row);
 
       navigator.clipboard.writeText(excelRowText).then(() => {
         copiedRowIndices.add(idx);
         btn.textContent = '✓ Copied';
         btn.classList.add('copied');
+        showToast('✓ Row copied for Excel!');
       }).catch(err => {
         alert('Could not copy to clipboard: ' + err);
+      });
+    }
+
+    // -------------------------------------------------------------
+    // EXCEL DRAG-TO-SELECT & RANGE COPY SYSTEM
+    // -------------------------------------------------------------
+    let isSelecting = false;
+    let startCell = null;
+
+    matchesTable.addEventListener('mousedown', (e) => {
+      const td = e.target.closest('td');
+      if (!td || td.getAttribute('data-col') === '15') return; // Skip Action button
+
+      isSelecting = true;
+      startCell = {
+        row: parseInt(td.parentElement.getAttribute('data-index') || '0'),
+        col: parseInt(td.getAttribute('data-col') || '0')
+      };
+      clearSelection();
+      td.classList.add('cell-selected');
+    });
+
+    matchesTable.addEventListener('mouseover', (e) => {
+      if (!isSelecting || !startCell) return;
+      const td = e.target.closest('td');
+      if (!td || td.getAttribute('data-col') === '15') return;
+
+      const currRow = parseInt(td.parentElement.getAttribute('data-index') || '0');
+      const currCol = parseInt(td.getAttribute('data-col') || '0');
+
+      const minRow = Math.min(startCell.row, currRow);
+      const maxRow = Math.max(startCell.row, currRow);
+      const minCol = Math.min(startCell.col, currCol);
+      const maxCol = Math.max(startCell.col, currCol);
+
+      clearSelection();
+
+      for (let r = minRow; r <= maxRow; r++) {
+        const rowEl = matchesTableBody.querySelector(`tr[data-index="${r}"]`);
+        if (rowEl) {
+          for (let c = minCol; c <= maxCol; c++) {
+            const cellEl = rowEl.querySelector(`td[data-col="${c}"]`);
+            if (cellEl) cellEl.classList.add('cell-selected');
+          }
+        }
+      }
+    });
+
+    document.addEventListener('mouseup', () => { isSelecting = false; });
+
+    // Handle Ctrl+C or Cmd+C for table selection
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        const selectedCells = matchesTableBody.querySelectorAll('td.cell-selected');
+        if (selectedCells.length > 0) {
+          const rowMap = new Map();
+          selectedCells.forEach(cell => {
+            const rowIdx = cell.parentElement.getAttribute('data-index');
+            if (!rowMap.has(rowIdx)) rowMap.set(rowIdx, []);
+            rowMap.get(rowIdx).push(cell.innerText.trim());
+          });
+
+          const tsvContent = Array.from(rowMap.values())
+            .map(cells => cells.join('\t'))
+            .join('\n');
+
+          navigator.clipboard.writeText(tsvContent).then(() => {
+            showToast(`✓ Copied ${selectedCells.length} selected cell${selectedCells.length === 1 ? '' : 's'}!`);
+          });
+        }
+      }
+    });
+
+    function clearSelection() {
+      matchesTableBody.querySelectorAll('td.cell-selected').forEach(el => {
+        el.classList.remove('cell-selected');
       });
     }
 
@@ -1777,6 +1947,7 @@
       resetTargetExcelTable();
       combinedMatchesData = [];
       copiedRowIndices.clear();
+      clearSelection();
       matchesTableBody.innerHTML = `<tr><td colspan="16" class="empty-state">Click "Run Full Automated Match" or enter search terms to populate.</td></tr>`;
       matchedCount.textContent = '0 matches';
       searchMatchBadge.textContent = '';
